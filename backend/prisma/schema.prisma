@@ -1,0 +1,362 @@
+// Schema do banco - Sistema de Estoque para Lojas de Bebidas
+// Rode: npx prisma migrate dev --name cascade_delete_empresa
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Empresa {
+  id             String   @id @default(uuid())
+  nome           String
+  slug           String   @unique
+  usuario        String   @unique
+  email          String?  @unique
+  senha          String
+  pinBaixaRapida String?  // hash bcrypt do PIN de 4 dígitos usado na baixa rápida via QR code
+  ativo          Boolean  @default(true)
+  criadoEm       DateTime @default(now())
+
+  // Assinatura/plano - Fase 4. plano é texto livre (ex: "BASICO", "PRO") em vez
+  // de enum pra não precisar de migration toda vez que surgir um plano novo.
+  plano            String?   @default("BASICO")
+  valorMensalidade Decimal?  @db.Decimal(10, 2)
+  dataVencimento   DateTime? // depois dessa data, o job de vencimento desativa a empresa automaticamente
+
+  produtos      Produto[]
+  movimentacoes Movimentacao[]
+  clientesFiado ClienteFiado[]
+  funcionarios  Funcionario[]
+
+  sangrias             Sangria[]
+  suprimentos          Suprimento[]
+  vendas               Venda[]
+  vasilhames           Vasilhame[]
+  vasilhameEmprestimos VasilhameEmprestimo[]
+  historicoPrecos      HistoricoPreco[]
+  inventarios          Inventario[]
+  fornecedores         Fornecedor[]
+
+  @@map("empresas")
+}
+
+enum PapelFuncionario {
+  ADMIN
+  FUNCIONARIO
+}
+
+model Sangria {
+  id              String   @id @default(uuid())
+  empresaId       String
+  empresa         Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  valor           Decimal  @db.Decimal(10, 2)
+  motivo          String?
+  responsavelNome String?  // nome de quem registrou a sangria (funcionário ou "Admin"), igual ao padrão já usado em Movimentacao
+  criadoEm        DateTime @default(now())
+
+  @@map("sangrias")
+}
+
+// Suprimento = reforço de caixa (dinheiro colocado na gaveta, ex: troco reforçado
+// no início do turno). É o oposto da Sangria - junto os dois permitem que o
+// "saldo esperado em dinheiro" do fechamento reflita a realidade da gaveta.
+model Suprimento {
+  id              String   @id @default(uuid())
+  empresaId       String
+  empresa         Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  valor           Decimal  @db.Decimal(10, 2)
+  motivo          String?
+  responsavelNome String?
+  criadoEm        DateTime @default(now())
+
+  @@map("suprimentos")
+}
+
+model Funcionario {
+  id             String           @id @default(uuid())
+  empresaId      String
+  empresa        Empresa          @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  nome           String
+  usuario        String
+  senha          String
+  papel          PapelFuncionario @default(FUNCIONARIO)
+  ativo          Boolean          @default(true)
+  podeVerCaixa   Boolean          @default(false)
+  podeVerEstoque Boolean          @default(false)
+  criadoEm       DateTime         @default(now())
+
+  @@unique([empresaId, usuario])
+  @@map("funcionarios")
+}
+
+model Produto {
+  id            String           @id @default(uuid())
+  nome          String
+  fotoUrl       String?
+  codigoBarras  String?
+  precoVenda    Decimal          @db.Decimal(10, 2)
+  precoCusto    Decimal?         @db.Decimal(10, 2)
+  precoCustoMedio Decimal?       @db.Decimal(10, 2) // custo médio ponderado, recalculado a cada entrada com custo informado
+  precoCartao   Decimal?         @db.Decimal(10, 2) // preço quando pago no crédito/débito, se for diferente do normal
+  estoqueAtual  Int              @default(0)
+  estoqueMinimo Int              @default(5)
+
+  // Venda por dose (Fase 5) - ex: garrafa de destilado vendida em doses.
+  // vendeDose ativa o botão "Dose" na Venda Rápida pra esse produto.
+  // dosesPorUnidade é quantas doses saem de 1 unidade quando ela é aberta
+  // (ex: garrafa de 1L com dose de 25ml = 40 doses). estoqueDoses é o estoque
+  // avulso de doses já abertas, separado do estoqueAtual (que conta garrafas
+  // fechadas/inteiras) - abrir uma unidade tira 1 do estoqueAtual e soma
+  // dosesPorUnidade no estoqueDoses.
+  vendeDose       Boolean  @default(false)
+  dosesPorUnidade Int?
+  precoDose       Decimal? @db.Decimal(10, 2)
+  precoDoseCartao Decimal? @db.Decimal(10, 2)
+  estoqueDoses    Int      @default(0)
+  categoria     CategoriaProduto @default(OUTROS)
+  revisado      Boolean          @default(true)
+  dataValidade       DateTime?
+  diasAlertaValidade Int?        @default(7)
+  ativo         Boolean          @default(true)
+  criadoEm      DateTime         @default(now())
+  atualizadoEm  DateTime         @updatedAt
+  empresaId     String
+  empresa       Empresa          @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  movimentacoes Movimentacao[]
+  unidadesVenda UnidadeVenda[]
+  historicoPrecos HistoricoPreco[]
+  itensInventario ItemInventario[]
+
+  @@unique([empresaId, codigoBarras])
+  @@map("produtos")
+}
+
+// Registra cada troca de preço de venda de um produto, pra dar pra investigar
+// "por que vendi mais barato semana passada" depois. Cada linha é imutável -
+// nunca é editada, só criada quando o preço muda de fato.
+model HistoricoPreco {
+  id          String   @id @default(uuid())
+  produtoId   String
+  produto     Produto  @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+  precoAntigo Decimal  @db.Decimal(10, 2)
+  precoNovo   Decimal  @db.Decimal(10, 2)
+  criadoEm    DateTime @default(now())
+  empresaId   String
+  empresa     Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@map("historico_precos")
+}
+
+enum TipoMovimentacao {
+  ENTRADA
+  SAIDA
+}
+
+enum FormaPagamento {
+  PIX
+  DEBITO
+  CREDITO
+  DINHEIRO
+  FIADO
+}
+
+model Movimentacao {
+  id                String            @id @default(uuid())
+  produtoId         String
+  produto           Produto           @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+  tipo              TipoMovimentacao
+  quantidade        Int
+  motivo            String?           // ex: "venda", "compra", "perda", "ajuste"
+  clienteFiadoId    String?
+  clienteFiado      ClienteFiado?     @relation(fields: [clienteFiadoId], references: [id], onDelete: Cascade)
+  criadoEm          DateTime          @default(now())
+  empresaId         String
+  empresa           Empresa           @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  formaPagamento    FormaPagamento?
+  unidadeVendaId    String?
+  quantidadeVendida Int?
+  valorTotal        Decimal?          @db.Decimal(10, 2)
+  idLocal           String?           @unique
+  responsavelNome   String?           // nome de quem registrou (funcionário ou "Admin"), gravado na hora - não muda se o funcionário for renomeado ou excluído depois
+  fornecedorId      String?           // só faz sentido em ENTRADA (compra/reposição)
+  fornecedor        Fornecedor?       @relation(fields: [fornecedorId], references: [id], onDelete: SetNull)
+  custoUnitario     Decimal?          @db.Decimal(10, 2) // custo pago por unidade nessa entrada, usado pra recalcular o custo médio do produto
+  ehDose            Boolean           @default(false) // true = venda de dose avulsa, debita estoqueDoses do produto em vez de estoqueAtual
+
+  // Liga esse item à Venda (carrinho) que o originou, quando a saída veio da
+  // tela de Venda Rápida com 2+ itens. Fica null pra ENTRADA e pra saídas
+  // avulsas feitas em "Registrar Movimentação" (que não passam por um carrinho)
+  // - inclusive as saídas antigas, de antes dessa mudança, que continuam null.
+  vendaId           String?
+  venda             Venda?            @relation(fields: [vendaId], references: [id], onDelete: SetNull)
+
+  @@map("movimentacoes")
+}
+
+// Agrupa os itens de uma mesma passagem pelo caixa (carrinho da Venda Rápida)
+// num único registro, com um total e uma forma de pagamento só. Antes cada
+// item do carrinho virava uma Movimentacao solta, sem nenhum vínculo entre
+// elas - não dava pra saber quantas vendas (tickets) realmente aconteceram,
+// nem cancelar a venda inteira de uma vez. Os itens continuam existindo como
+// Movimentacao (pra não quebrar histórico de fiado, giro de estoque etc.),
+// só que agora referenciando essa Venda.
+model Venda {
+  id              String          @id @default(uuid())
+  empresaId       String
+  empresa         Empresa         @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  formaPagamento  FormaPagamento
+  valorTotal      Decimal         @db.Decimal(10, 2)
+  clienteFiadoId  String?
+  // SetNull (não Cascade como em Movimentacao) de propósito: excluir um
+  // cliente fiado não deveria apagar o histórico financeiro da venda em si.
+  clienteFiado    ClienteFiado?   @relation(fields: [clienteFiadoId], references: [id], onDelete: SetNull)
+  responsavelNome String?
+  idLocal         String?         @unique // id gerado no celular quando offline, evita duplicar ao sincronizar
+  criadoEm        DateTime        @default(now())
+
+  itens Movimentacao[]
+
+  @@map("vendas")
+}
+
+model ClienteFiado {
+  id            String   @id @default(uuid())
+  nome          String
+  telefone      String?
+  saldoDevedor  Decimal  @default(0) @db.Decimal(10, 2)
+  limiteCredito Decimal? @db.Decimal(10, 2)
+  criadoEm      DateTime @default(now())
+  empresaId     String
+  empresa       Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  movimentacoes        Movimentacao[]
+  vendas               Venda[]
+  pagamentos           PagamentoFiado[]
+  vasilhameEmprestimos VasilhameEmprestimo[]
+
+  @@map("clientes_fiado")
+}
+
+model PagamentoFiado {
+  id        String       @id @default(uuid())
+  clienteId String
+  cliente   ClienteFiado @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  valor     Decimal      @db.Decimal(10, 2)
+  criadoEm  DateTime     @default(now())
+
+  @@map("pagamentos_fiado")
+}
+
+enum TipoVasilhameMovimento {
+  EMPRESTADO
+  DEVOLVIDO
+}
+
+model Vasilhame {
+  id        String   @id @default(uuid())
+  empresaId String
+  empresa   Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  nome      String   // ex: "Casco Skol 600ml", "Engradado Coca 12un"
+  criadoEm  DateTime @default(now())
+
+  emprestimos VasilhameEmprestimo[]
+
+  @@map("vasilhames")
+}
+
+model VasilhameEmprestimo {
+  id                String                 @id @default(uuid())
+  vasilhameId       String
+  vasilhame         Vasilhame              @relation(fields: [vasilhameId], references: [id])
+  clienteFiadoId    String?
+  clienteFiado      ClienteFiado?          @relation(fields: [clienteFiadoId], references: [id], onDelete: Cascade)
+  clienteNomeAvulso String?                // pra cliente que não é cadastrado como fiado
+  quantidade        Int
+  tipo              TipoVasilhameMovimento
+  criadoEm          DateTime               @default(now())
+  empresaId         String
+  empresa           Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@map("vasilhame_emprestimos")
+}
+
+enum CategoriaProduto {
+  CERVEJA
+  REFRIGERANTE
+  AGUA
+  ENERGETICO
+  DESTILADO
+  OUTROS
+}
+
+model UnidadeVenda {
+  id                   String   @id @default(uuid())
+  produtoId            String
+  produto              Produto  @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+  nome                 String   // "Fardo (12 un)", "Caixa (24 un)"
+  quantidadeEmUnidades Int      // quantas unidades-base equivalem a essa embalagem
+  precoVenda           Decimal  @db.Decimal(10, 2)
+  precoCartao          Decimal? @db.Decimal(10, 2) // preço quando pago no crédito/débito, se for diferente do normal
+  criadoEm             DateTime @default(now())
+
+  @@map("unidades_venda")
+}
+
+// Fornecedor de quem a loja compra pra repor estoque (Fase 3 - controle de fornecedor)
+model Fornecedor {
+  id          String   @id @default(uuid())
+  empresaId   String
+  empresa     Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  nome        String
+  telefone    String?
+  observacoes String?
+  ativo       Boolean  @default(true)
+  criadoEm    DateTime @default(now())
+
+  movimentacoes Movimentacao[]
+
+  @@map("fornecedores")
+}
+
+enum StatusInventario {
+  EM_ANDAMENTO
+  FINALIZADO
+  CANCELADO
+}
+
+// Contagem física de estoque (Fase 3 - inventário). Cada Inventario é uma
+// "sessão de contagem": ao criar, tira um retrato do estoque atual de cada
+// produto (estoqueSistema); ao finalizar, compara com o que foi contado e
+// gera os ajustes (Movimentacao) necessários pra bater o estoque real.
+model Inventario {
+  id              String           @id @default(uuid())
+  empresaId       String
+  empresa         Empresa          @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  status          StatusInventario @default(EM_ANDAMENTO)
+  responsavelNome String?
+  criadoEm        DateTime         @default(now())
+  finalizadoEm    DateTime?
+
+  itens ItemInventario[]
+
+  @@map("inventarios")
+}
+
+model ItemInventario {
+  id             String     @id @default(uuid())
+  inventarioId   String
+  inventario     Inventario @relation(fields: [inventarioId], references: [id], onDelete: Cascade)
+  produtoId      String
+  produto        Produto    @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+  estoqueSistema Int        // quanto o sistema achava que tinha quando o inventário começou
+  estoqueContado Int?       // null = ainda não contado nessa sessão
+  contadoEm      DateTime?
+
+  @@unique([inventarioId, produtoId])
+  @@map("itens_inventario")
+}

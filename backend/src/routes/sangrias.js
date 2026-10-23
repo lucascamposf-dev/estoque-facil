@@ -1,0 +1,38 @@
+const express = require('express');
+const prisma = require('../prismaClient');
+const { autenticar } = require('../middleware/auth');
+const { inicioDoDiaBrasil } = require('../utils/data');
+
+const router = express.Router();
+router.use(autenticar);
+
+router.get('/', async (req, res) => {
+  try {
+    const inicioDoDia = inicioDoDiaBrasil();
+
+    const sangrias = await prisma.sangria.findMany({
+      where: { empresaId: req.empresaId, criadoEm: { gte: inicioDoDia } },
+      orderBy: { criadoEm: 'desc' },
+    });
+    res.json(sangrias);
+  } catch (erro) {
+    res.status(500).json({ erro: 'Erro ao buscar sangrias', detalhe: erro.message });
+  }
+});
+
+router.post('/', async (req, res) => {
+  try {
+    const { valor, motivo } = req.body;
+    if (!valor || Number(valor) <= 0) {
+      return res.status(400).json({ erro: 'Informe um valor válido' });
+    }
+    const sangria = await prisma.sangria.create({
+      data: { empresaId: req.empresaId, valor, motivo: motivo || null },
+    });
+    res.status(201).json(sangria);
+  } catch (erro) {
+    res.status(500).json({ erro: 'Erro ao registrar sangria', detalhe: erro.message });
+  }
+});
+
+module.exports = router;

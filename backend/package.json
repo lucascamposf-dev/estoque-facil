@@ -1,0 +1,24 @@
+{
+  "name": "estoque-backend",
+  "version": "1.0.0",
+  "description": "⚠️ RECONSTRUÍDO - este package.json não estava no backup (foi sobrescrito pelo package.json do frontend, que tinha o mesmo nome de arquivo quando tudo foi zipado numa pasta só). Montei a lista de dependências com base no que os arquivos de backend realmente importam (require). Rode 'npm install' e confira se instala tudo sem erro; se sua versão original tinha pacotes extras não usados em nenhum require, eles não vão aparecer aqui.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.19.1",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4",
+    "prisma": "^5.19.1"
+  }
+}

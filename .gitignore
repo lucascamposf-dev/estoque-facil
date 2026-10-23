@@ -1,0 +1,20 @@
+# Dependências
+node_modules/
+
+# Variáveis de ambiente com senhas - NUNCA subir pro GitHub
+.env
+.env.local
+
+# Build
+dist/
+frontend/dist/
+
+# Prisma
+backend/prisma/migrations/dev.db
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+*.zip
+.env

@@ -1,0 +1,17 @@
+-- ⚠️ Este SQL é o "migration.sql" solto que veio no seu backup, junto com o
+-- migration_lock.toml. Ele NÃO bate com o schema.prisma atual (referencia
+-- tabelas "contagens_estoque"/"itens_contagem", enquanto o schema atual usa
+-- "inventarios"/"itens_inventario") - ou seja, é uma migração de uma versão
+-- ANTIGA do projeto, não a mais recente.
+--
+-- Não coloque este arquivo dentro de uma pasta de migrations pra rodar -
+-- isso pode confundir o histórico do Prisma (_prisma_migrations no banco).
+-- Seu banco de produção já deve estar com o schema atual aplicado; o
+-- histórico real de migrations está no seu repositório/máquina de
+-- desenvolvimento (pasta backend/prisma/migrations com várias subpastas
+-- com timestamp), não neste backup - o backup só trouxe o arquivo solto da
+-- migração mais antiga por engano.
+--
+-- Pra aplicar só a mudança de "venda por dose" que adicionei agora, rode:
+--   npx prisma migrate dev --name venda_por_dose
+-- (isso gera a migration nova certa, comparando com o banco real)
